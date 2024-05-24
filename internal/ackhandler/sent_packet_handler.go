@@ -2,6 +2,7 @@ package ackhandler
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"time"
 
@@ -72,8 +73,7 @@ type sentPacketHandler struct {
 	alarm time.Time
 
 	traceCallback func(quictrace.Event)
-
-	logger utils.Logger
+	logger        utils.Logger
 }
 
 // NewSentPacketHandler creates a new sentPacketHandler
@@ -86,7 +86,7 @@ func NewSentPacketHandler(
 	congestion := congestion.NewCubicSender(
 		congestion.DefaultClock{},
 		rttStats,
-		true, // use Reno
+		false, // use Reno
 		protocol.InitialCongestionWindow,
 		protocol.DefaultMaxCongestionWindow,
 	)
@@ -375,12 +375,11 @@ func (h *sentPacketHandler) detectLostPackets(
 
 	// Packets sent before this time are deemed lost.
 	lostSendTime := now.Add(-lossDelay)
-
 	var lostPackets []*Packet
 	pnSpace.history.Iterate(func(packet *Packet) (bool, error) {
-		if packet.PacketNumber > pnSpace.largestAcked {
+		/* if packet.PacketNumber > pnSpace.largestAcked {
 			return false, nil
-		}
+		} */
 
 		if packet.SendTime.Before(lostSendTime) || pnSpace.largestAcked >= packet.PacketNumber+packetThreshold {
 			lostPackets = append(lostPackets, packet)
@@ -394,7 +393,13 @@ func (h *sentPacketHandler) detectLostPackets(
 		}
 		return true, nil
 	})
+	for _, packet := range lostPackets {
+		log.Printf("\tLost Packet Number: %#x, Encryption Level: %s\n", packet.PacketNumber, encLevel)
+	}
 
+	if len(lostPackets) > 0 {
+		h.congestion.RecordPacketLoss()
+	}
 	if h.logger.Debug() && len(lostPackets) > 0 {
 		pns := make([]protocol.PacketNumber, len(lostPackets))
 		for i, p := range lostPackets {

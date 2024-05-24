@@ -40,7 +40,7 @@ var _ = Describe("Cubic Sender", func() {
 		ackedPacketNumber = 0
 		clock = mockClock{}
 		rttStats = NewRTTStats()
-		sender = NewCubicSender(&clock, rttStats, true /*reno*/, initialCongestionWindowPackets*protocol.DefaultTCPMSS, MaxCongestionWindow)
+		sender = NewHyblaSender(&clock, rttStats, true /*reno*/, initialCongestionWindowPackets*protocol.DefaultTCPMSS, MaxCongestionWindow)
 	})
 
 	SendAvailableSendWindowLen := func(packetLength protocol.ByteCount) int {
@@ -400,7 +400,7 @@ var _ = Describe("Cubic Sender", func() {
 	It("tcp cubic reset epoch on quiescence", func() {
 		const maxCongestionWindow = 50
 		const maxCongestionWindowBytes = maxCongestionWindow * protocol.DefaultTCPMSS
-		sender = NewCubicSender(&clock, rttStats, false, initialCongestionWindowPackets*protocol.DefaultTCPMSS, maxCongestionWindowBytes)
+		sender = NewHyblaSender(&clock, rttStats, false, initialCongestionWindowPackets*protocol.DefaultTCPMSS, maxCongestionWindowBytes)
 
 		numSent := SendAvailableSendWindow()
 
@@ -600,7 +600,7 @@ var _ = Describe("Cubic Sender", func() {
 	})
 
 	It("default max cwnd", func() {
-		sender = NewCubicSender(&clock, rttStats, true /*reno*/, initialCongestionWindowPackets*protocol.DefaultTCPMSS, protocol.DefaultMaxCongestionWindow)
+		sender = NewHyblaSender(&clock, rttStats, true /*reno*/, initialCongestionWindowPackets*protocol.DefaultTCPMSS, protocol.DefaultMaxCongestionWindow)
 
 		defaultMaxCongestionWindowPackets := protocol.DefaultMaxCongestionWindow / protocol.DefaultTCPMSS
 		for i := 1; i < int(defaultMaxCongestionWindowPackets); i++ {
@@ -612,7 +612,7 @@ var _ = Describe("Cubic Sender", func() {
 
 	It("limit cwnd increase in congestion avoidance", func() {
 		// Enable Cubic.
-		sender = NewCubicSender(&clock, rttStats, false, initialCongestionWindowPackets*protocol.DefaultTCPMSS, MaxCongestionWindow)
+		sender = NewHyblaSender(&clock, rttStats, false, initialCongestionWindowPackets*protocol.DefaultTCPMSS, MaxCongestionWindow)
 		numSent := SendAvailableSendWindow()
 
 		// Make sure we fall out of slow start.

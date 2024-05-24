@@ -12,7 +12,8 @@ require (
 	github.com/marten-seemann/qtls v0.4.1
 	github.com/onsi/ginkgo v1.7.0
 	github.com/onsi/gomega v1.4.3
-	golang.org/x/crypto v0.0.0-20190829043050-9756ffdc2472
-	golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3
-	golang.org/x/sync v0.0.0-20180314180146-1d60e4601c6f
+	golang.org/x/crypto v0.1.0
+	golang.org/x/net v0.9.0
+	golang.org/x/sync v0.1.0
+	gonum.org/v1/plot v0.14.0 // indirect
 )
