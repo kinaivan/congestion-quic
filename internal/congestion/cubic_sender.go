@@ -277,7 +277,6 @@ func (h *hyblaSender) OnPacketLost(
 	// TCP NewReno (RFC6582) says that once a loss occurs, any losses in packets
 	// already sent should be treated as a single loss event, since it's expected.
 	if packetNumber <= h.largestSentAtLastCutback {
-		log.Printf("WHAT THE HELLL")
 		if h.lastCutbackExitedSlowstart {
 			h.stats.slowstartPacketsLost++
 			h.stats.slowstartBytesLost += lostBytes
@@ -342,6 +341,7 @@ func (h *hyblaSender) maybeIncreaseCwnd(
 	if !h.isCwndLimited(priorInFlight) {
 		log.Printf("LIMITED: %d, thresh %d, infli: %d, bandwidth: %d, rtt: %d\n", h.congestionWindow, h.slowstartThreshold, priorInFlight, h.BandwidthEstimate(), h.rttStats.SmoothedRTT())
 		h.hybla.OnApplicationLimited()
+		h.RecordCongestionWindow()
 		return
 	}
 	if h.congestionWindow >= h.maxCongestionWindow {
@@ -438,7 +438,7 @@ func (h *hyblaSender) SetSlowStartLargeReduction(enabled bool) {
 	h.slowStartLargeReduction = enabled
 } */
 
-package congestion
+/* package congestion
 
 import (
 	"bufio"
@@ -455,6 +455,7 @@ const (
 	maxBurstBytes                                     = 3 * protocol.DefaultTCPMSS
 	renoBeta                       float32            = 0.7 // Reno backoff factor.
 	defaultMinimumCongestionWindow protocol.ByteCount = 2 * protocol.DefaultTCPMSS
+	ssOffset                       int                = 50
 )
 
 type cubicSender struct {
@@ -505,6 +506,7 @@ type cubicSender struct {
 	initialMaxCongestionWindow protocol.ByteCount
 
 	minSlowStartExitWindow protocol.ByteCount
+	previousRTT            time.Duration
 }
 
 var _ SendAlgorithm = &cubicSender{}
@@ -634,7 +636,9 @@ func (c *cubicSender) InRecovery() bool {
 }
 
 func (c *cubicSender) InSlowStart() bool {
-	return c.GetCongestionWindow() < c.GetSlowStartThreshold()
+	log.Printf("HELLO HELLO PRINTING : %d %d\n", c.rttStats.SmoothedRTT()/1000000, c.previousRTT/1000000)
+	return ((c.previousRTT == 0) || ((int(c.rttStats.SmoothedRTT()) / 1000000) < ((int(c.previousRTT) / 1000000) + ssOffset)))
+	//return c.GetCongestionWindow() < c.GetSlowStartThreshold()
 }
 
 func (c *cubicSender) GetCongestionWindow() protocol.ByteCount {
@@ -751,7 +755,7 @@ func (c *cubicSender) maybeIncreaseCwnd(
 	// the current window.
 	if !c.isCwndLimited(priorInFlight) {
 		c.cubic.OnApplicationLimited()
-		//log.Printf("LIMITED: %d, thresh %d, infli: %d, bandwidth: %d, rtt: %d, minrtt: %d\n", c.congestionWindow, c.slowstartThreshold, priorInFlight, c.BandwidthEstimate(), c.rttStats.SmoothedRTT()/1000000)
+		log.Printf("LIMITED: %d, thresh %d, infli: %d, bandwidth: %d, rtt: %d, lastrtt: %d\n", c.congestionWindow, c.slowstartThreshold, priorInFlight, c.BandwidthEstimate(), c.rttStats.SmoothedRTT()/1000000, c.previousRTT/1000000)
 		return
 	}
 	if c.congestionWindow >= c.maxCongestionWindow {
@@ -761,7 +765,8 @@ func (c *cubicSender) maybeIncreaseCwnd(
 		// TCP slow start, exponential growth, increase by one for each ACK.
 		c.RecordCongestionWindow()
 		c.congestionWindow += protocol.DefaultTCPMSS
-		log.Printf("AFTER SS: %d, thresh %d, infli: %d, bandwidth: %d, rtt: %d, minrtt: %d\n", c.congestionWindow, c.slowstartThreshold, priorInFlight, c.BandwidthEstimate(), c.rttStats.SmoothedRTT()/1000000)
+		log.Printf("AFTER SS: %d, thresh %d, infli: %d, bandwidth: %d, rtt: %d, lastrtt: %d\n", c.congestionWindow, c.slowstartThreshold, priorInFlight, c.BandwidthEstimate(), c.rttStats.SmoothedRTT()/1000000, c.previousRTT/1000000)
+		c.previousRTT = c.rttStats.SmoothedRTT()
 		return
 	}
 	// Congestion avoidance
@@ -777,7 +782,8 @@ func (c *cubicSender) maybeIncreaseCwnd(
 	} else {
 		c.RecordCongestionWindow()
 		c.congestionWindow = utils.MinByteCount(c.maxCongestionWindow, c.cubic.CongestionWindowAfterAck(ackedBytes, c.congestionWindow, c.rttStats.MinRTT(), eventTime, c.rttStats.SmoothedRTT()))
-		log.Printf("AFTER CA: %d, thresh %d, infli: %d, bandwidth: %d, rtt: %d, minrtt: %d\n", c.congestionWindow, c.slowstartThreshold, priorInFlight, c.BandwidthEstimate(), c.rttStats.SmoothedRTT()/1000000)
+		log.Printf("AFTER CA: %d, thresh %d, infli: %d, bandwidth: %d, rtt: %d, lastrtt: %d\n", c.congestionWindow, c.slowstartThreshold, priorInFlight, c.BandwidthEstimate(), c.rttStats.SmoothedRTT()/1000000, c.previousRTT/1000000)
+		c.previousRTT = c.rttStats.SmoothedRTT()
 	}
 }
 
@@ -842,4 +848,415 @@ func (c *cubicSender) OnConnectionMigration() {
 // SetSlowStartLargeReduction allows enabling the SSLR experiment
 func (c *cubicSender) SetSlowStartLargeReduction(enabled bool) {
 	c.slowStartLargeReduction = enabled
+} */
+
+package congestion
+
+import (
+	"bufio"
+	"fmt"
+	"log"
+	"os"
+	"time"
+
+	"github.com/lucas-clemente/quic-go/internal/protocol"
+	"github.com/lucas-clemente/quic-go/internal/utils"
+)
+
+const (
+	maxBurstBytes                                     = 3 * protocol.DefaultTCPMSS
+	defaultMinimumCongestionWindow protocol.ByteCount = 2 * protocol.DefaultTCPMSS
+	ssOffset                       int                = 100
+	ssThresh                       int                = 800
+)
+
+type BBRSender struct {
+	rttStats  *RTTStats
+	stats     connectionStats
+	bbr       *BBR
+	firstRun  uint32
+	ssCounter uint32
+	minrtt    int
+	epoch     time.Time
+	more      int
+	less      int
+
+	// Track the largest packet that has been sent.
+	largestSentPacketNumber protocol.PacketNumber
+
+	// Track the largest packet that has been acked.
+	largestAckedPacketNumber protocol.PacketNumber
+
+	// Track the largest packet number outstanding when a CWND cutback occurs.
+	largestSentAtLastCutback protocol.PacketNumber
+
+	// Whether the last loss event caused us to exit slowstart.
+	// Used for stats collection of slowstartPacketsLost
+	lastCutbackExitedSlowstart bool
+
+	// Congestion window in packets.
+	congestionWindow protocol.ByteCount
+
+	// Minimum congestion window in packets.
+	minCongestionWindow protocol.ByteCount
+
+	// Maximum congestion window.
+	maxCongestionWindow protocol.ByteCount
+
+	// Number of connections to simulate.
+	numConnections int
+
+	// ACK counter for the Reno implementation.
+	numAckedPackets     int
+	ssFlag              int
+	prevNumAckedPackets int
+
+	initialCongestionWindow    protocol.ByteCount
+	initialMaxCongestionWindow protocol.ByteCount
+	minSlowStartExitWindow     protocol.ByteCount
+	previousRTT                int
+	increaseFlag               int
+	epochCounter               int
+}
+
+var _ SendAlgorithm = &BBRSender{}
+var _ SendAlgorithmWithDebugInfos = &BBRSender{}
+
+// RecordCongestionWindow records the congestion window and its timestamp.
+func (b *BBRSender) RecordCongestionWindow() {
+
+	// Construct the file path for the "save.txt" file in the home directory
+	filePath := "/test_container/save.txt"
+
+	// Open the file in append mode, creating it if it doesn't exist
+	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		log.Println("Error opening file:", err)
+		return
+	}
+	defer file.Close()
+
+	// Create a writer to append content to the file
+	writer := bufio.NewWriter(file)
+
+	// Write the congestion window size to the file
+	_, err = fmt.Fprintf(writer, "\nSize of cwnd at moment %s is %d\n", time.Now().Format("2006-01-02 15:04:05"), int(b.congestionWindow))
+	if err != nil {
+		log.Println("Error writing to file:", err)
+		return
+	}
+	// Flush the writer to ensure all buffered data is written to the file
+	err = writer.Flush()
+	if err != nil {
+		log.Println("Error flushing writer:", err)
+		return
+	}
+	//log.Println("Congestion window size recorded in the file successfully.")
+}
+
+// RecordCongestionWindow records the congestion window and its timestamp.
+func (b *BBRSender) RecordPacketLoss() {
+
+	// Construct the file path for the "save.txt" file in the home directory
+	filePath := "/test_container/save.txt"
+
+	// Open the file in append mode, creating it if it doesn't exist
+	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		log.Println("Error opening file:", err)
+		return
+	}
+	defer file.Close()
+
+	// Create a writer to append content to the file
+	writer := bufio.NewWriter(file)
+
+	// Write the congestion window size to the file
+	_, err = fmt.Fprintf(writer, "YOU HAVE REACHED SOME PACKET LOSS HERE\n")
+	if err != nil {
+		log.Println("Error writing to file:", err)
+		return
+	}
+	// Flush the writer to ensure all buffered data is written to the file
+	err = writer.Flush()
+	if err != nil {
+		log.Println("Error flushing writer:", err)
+		return
+	}
+	//log.Println("Congestion window size recorded in the file successfully.")
+}
+
+// NewbbrSender makes a new bbr sender
+func NewBBRSender(clock Clock, rttStats *RTTStats, reno bool, initialCongestionWindow, initialMaxCongestionWindow protocol.ByteCount) *BBRSender {
+	return &BBRSender{
+		rttStats:                   rttStats,
+		largestSentPacketNumber:    protocol.InvalidPacketNumber,
+		largestAckedPacketNumber:   protocol.InvalidPacketNumber,
+		largestSentAtLastCutback:   protocol.InvalidPacketNumber,
+		initialCongestionWindow:    initialCongestionWindow,
+		initialMaxCongestionWindow: initialMaxCongestionWindow,
+		congestionWindow:           initialCongestionWindow,
+		minCongestionWindow:        defaultMinimumCongestionWindow,
+		maxCongestionWindow:        initialMaxCongestionWindow,
+		numConnections:             defaultNumConnections,
+		bbr:                        NewBBR(clock),
+		ssCounter:                  0,
+		firstRun:                   1,
+		previousRTT:                10000,
+		increaseFlag:               0,
+		numAckedPackets:            0,
+		prevNumAckedPackets:        0,
+		epochCounter:               0,
+		ssFlag:                     1,
+		more:                       0,
+		less:                       0,
+		epoch:                      time.Time{},
+		minrtt:                     10000,
+	}
+}
+
+func (b *BBRSender) rttHasIncreased() bool {
+	if b.previousRTT == 10000 {
+		return false
+	}
+	return ((int(b.rttStats.SmoothedRTT()/1000000) > (b.previousRTT + ssOffset)) || (b.previousRTT > ssThresh))
+}
+
+// TimeUntilSend returns when the next packet should be sent.
+func (b *BBRSender) TimeUntilSend(bytesInFlight protocol.ByteCount) time.Duration {
+	return b.rttStats.SmoothedRTT() * time.Duration(protocol.DefaultTCPMSS) / time.Duration(2*b.GetCongestionWindow())
+}
+
+func (b *BBRSender) OnPacketSent(
+	sentTime time.Time,
+	bytesInFlight protocol.ByteCount,
+	packetNumber protocol.PacketNumber,
+	bytes protocol.ByteCount,
+	isRetransmittable bool,
+) {
+	if !isRetransmittable {
+		return
+	}
+	b.largestSentPacketNumber = packetNumber
+}
+
+func (b *BBRSender) CanSend(bytesInFlight protocol.ByteCount) bool {
+	return bytesInFlight < b.GetCongestionWindow()
+}
+
+func (b *BBRSender) InRecovery() bool {
+	return b.largestAckedPacketNumber != protocol.InvalidPacketNumber && b.largestAckedPacketNumber <= b.largestSentAtLastCutback
+}
+
+func (b *BBRSender) InSlowStart() bool {
+	if b.previousRTT == 10000 {
+		return true
+	}
+	return b.previousRTT < ssThresh //((b.previousRTT == 10000) || ((int(b.rttStats.SmoothedRTT()) / 1000000) < ssThresh)) //((int(b.previousRTT) / 1000000) + ssOffset)))
+}
+
+func (b *BBRSender) GetCongestionWindow() protocol.ByteCount {
+	return b.congestionWindow
+}
+
+func (b *BBRSender) MaybeExitSlowStart() {
+
+}
+
+func (b *BBRSender) OnPacketAcked(
+	ackedPacketNumber protocol.PacketNumber,
+	ackedBytes protocol.ByteCount,
+	priorInFlight protocol.ByteCount,
+	eventTime time.Time,
+) {
+	b.numAckedPackets += 1
+	b.largestAckedPacketNumber = utils.MaxPacketNumber(ackedPacketNumber, b.largestAckedPacketNumber)
+	if b.InRecovery() {
+		return
+	}
+	b.maybeIncreaseCwnd(ackedPacketNumber, ackedBytes, priorInFlight, eventTime)
+}
+
+func (b *BBRSender) OnPacketLost(
+	packetNumber protocol.PacketNumber,
+	lostBytes protocol.ByteCount,
+	priorInFlight protocol.ByteCount,
+) {
+	b.RecordPacketLoss()
+	// TCP NewReno (RFC6582) says that once a loss occurs, any losses in packets
+	// already sent should be treated as a single loss event, since it's expected.
+	if packetNumber <= b.largestSentAtLastCutback {
+		if b.lastCutbackExitedSlowstart {
+			b.stats.slowstartPacketsLost++
+			b.stats.slowstartBytesLost += lostBytes
+		}
+		return
+	}
+	b.lastCutbackExitedSlowstart = b.InSlowStart()
+	if b.InSlowStart() {
+		b.stats.slowstartPacketsLost++
+	}
+
+	//b.congestionWindow = b.bbr.CongestionWindowAfterPacketLoss(b.congestionWindow)
+	b.RecordCongestionWindow()
+	b.largestSentAtLastCutback = b.largestSentPacketNumber
+	// reset packet count from congestion avoidance mode. We start
+	// counting again when we're out of recovery.
+	// b.numAckedPackets = 0
+}
+
+func (b *BBRSender) epochCheck() {
+	if b.increaseFlag == 1 {
+		b.increaseFlag = 0
+		b.prevNumAckedPackets = b.numAckedPackets
+		b.numAckedPackets = 0
+	}
+	if b.epochCounter >= 10 {
+		log.Printf("END OF EPOCH\nEND OF EPOCH\nEND OF EPOCH\n Minimum over rtt: %d\n", b.rttStats.MinRTT())
+		b.epochCounter = 0
+		if !b.rttHasIncreased() {
+			b.congestionWindow = protocol.ByteCount(float32(b.congestionWindow) * 1.25)
+			b.congestionWindow = utils.MinByteCount(b.maxCongestionWindow, b.congestionWindow)
+			b.more = 2
+		}
+		b.increaseFlag = 1
+	}
+}
+
+// Called when we receive an ack. Normal TCP tracks how many packets one ack
+// represents, but quic has a separate ack for each packet.
+func (b *BBRSender) maybeIncreaseCwnd(
+	_ protocol.PacketNumber,
+	ackedBytes protocol.ByteCount,
+	priorInFlight protocol.ByteCount,
+	eventTime time.Time,
+) {
+	currentTime := time.Now()
+	timeSinceEpoch := currentTime.Sub(b.epoch)
+	if b.minrtt > (int(b.rttStats.SmoothedRTT()) / 1000000) {
+		b.minrtt = int(b.rttStats.SmoothedRTT()) / 1000000
+	}
+	if (int(timeSinceEpoch) / 1000000) > b.previousRTT {
+		/* if b.less == 2 {
+			b.congestionWindow = protocol.ByteCount(float32(b.congestionWindow) * 1.18)
+			b.congestionWindow = utils.MinByteCount(b.maxCongestionWindow, b.congestionWindow)
+		} */
+		//log.Printf("Epoch ENDED: %s, currentTime: %s, timeSinceEpoch: %d\n", b.epoch, currentTime, int(timeSinceEpoch)/1000000)
+		b.epoch = currentTime
+		b.epochCounter += 1
+		//log.Printf("Min: %d, Smooth: %d, timeSince: %d\n", b.minrtt, b.rttStats.SmoothedRTT()/1000000, timeSinceEpoch/1000000)
+		b.previousRTT = b.minrtt
+		b.minrtt = 10000
+		//b.more = 0
+		//b.less = 0
+	}
+	/* if b.more == 2 || b.less == 2 {
+		log.Printf("MORE/LESS: %d, infli: %d, bandwidth: %d, rtt: %d, timeSinceEpoch: %d, minrtt: %d, previousRTT: %d\n", b.congestionWindow, priorInFlight, b.BandwidthEstimate(), int(b.rttStats.SmoothedRTT())/1000000, int(timeSinceEpoch)/1000000, b.minrtt, b.previousRTT)
+		b.RecordCongestionWindow()
+		return
+	} */
+	// Do not increase the congestion window unless the sender is close to using
+	// the current window.
+	if !b.isCwndLimited(priorInFlight) {
+		log.Printf("LIMIT: %d, infli: %d, bandwidth: %d, rtt: %d, timeSinceEpoch: %d, minrtt: %d, previousRTT: %d\n", b.congestionWindow, priorInFlight, b.BandwidthEstimate(), int(b.rttStats.SmoothedRTT())/1000000, int(timeSinceEpoch)/1000000, b.minrtt, b.previousRTT)
+		//log.Printf("pnum: %d, ssthresh: %d, b.congestionWindow: %d, ssCounter: %d, inFlight = %d\n", b.p, b.slowstartThreshold, b.congestionWindow, b.ssCounter, priorInFlight)
+		if b.ssFlag != 2 {
+			b.RecordCongestionWindow()
+			return
+		}
+		if b.increaseFlag == 1 && b.rttHasIncreased() == true && b.ssFlag == 2 {
+			b.congestionWindow = utils.MinByteCount(b.maxCongestionWindow, b.congestionWindow)
+			b.congestionWindow = utils.MinByteCount(b.maxCongestionWindow, protocol.ByteCount(int((float32(b.congestionWindow) * 0.8))))
+			b.less = 2
+			b.epochCheck()
+		} else {
+			b.epochCheck()
+		}
+		b.RecordCongestionWindow()
+		return
+	}
+	if b.InSlowStart() && b.ssFlag != 2 {
+		// TCP slow start, exponential growth, increase by one for each ACK.
+		b.congestionWindow += protocol.DefaultTCPMSS
+		log.Printf("SS: %d, infli: %d, bandwidth: %d, rtt: %d, timeSinceEpoch: %d, minrtt: %d, previousRTT: %d\n", b.congestionWindow, priorInFlight, b.BandwidthEstimate(), int(b.rttStats.SmoothedRTT())/1000000, int(timeSinceEpoch)/1000000, b.minrtt, b.previousRTT)
+		b.RecordCongestionWindow()
+		return
+	} else {
+		b.ssFlag = 2
+		if b.increaseFlag == 1 && b.rttHasIncreased() == true {
+			//b.congestionWindow = b.bbr.CongestionWindowAfterAck(ackedBytes, b.congestionWindow, eventTime, b.BandwidthEstimate())
+			b.congestionWindow = utils.MinByteCount(b.maxCongestionWindow, b.congestionWindow)
+			b.congestionWindow = protocol.ByteCount(int(float32(b.congestionWindow) * 0.8))
+			//b.less = 2
+		} else {
+			//log.Printf("pnum: %d, ssthresh: %d, b.congestionWindow: %d, ssCounter: %d, inFlight = %d\n", b.p, h.slowstartThreshold, h.congestionWindow, h.ssCounter, priorInFlight)
+			//b.congestionWindow = b.bbr.CongestionWindowAfterAck(ackedBytes, b.congestionWindow, eventTime, b.BandwidthEstimate())
+			b.congestionWindow = utils.MinByteCount(b.maxCongestionWindow, b.congestionWindow)
+
+		}
+		log.Printf("CA: %d, infli: %d, bandwidth: %d, rtt: %d, timeSinceEpoch: %d, minrtt: %d, previousRTT: %d\n", b.congestionWindow, priorInFlight, b.BandwidthEstimate(), int(b.rttStats.SmoothedRTT())/1000000, int(timeSinceEpoch)/1000000, b.minrtt, b.previousRTT)
+		b.epochCheck()
+		b.RecordCongestionWindow()
+	}
+}
+
+func (b *BBRSender) isCwndLimited(bytesInFlight protocol.ByteCount) bool {
+	congestionWindow := b.GetCongestionWindow()
+	if bytesInFlight >= congestionWindow {
+		return true
+	}
+	availableBytes := congestionWindow - bytesInFlight
+
+	return false || availableBytes <= protocol.ByteCount(uint32(maxBurstBytes))
+}
+
+// BandwidthEstimate returns the current bandwidth estimate
+func (b *BBRSender) BandwidthEstimate() protocol.ByteCount {
+	/* srtt := b.rttStats.SmoothedRTT()
+	if srtt == 0 {
+		// If we haven't measured an rtt, the bandwidth estimate is unknown.
+		return 0
+	}
+	if BandwidthFromDelta(b.GetCongestionWindow(), srtt) > Bandwidth(b.minCongestionWindow) {
+		return protocol.ByteCount(BandwidthFromDelta(b.GetCongestionWindow(), srtt))
+	} else {
+		return b.minCongestionWindow
+	} */
+	srtt := b.rttStats.MinRTT()
+	if srtt == 0 {
+		return 0
+	}
+	estimate := b.prevNumAckedPackets * int(protocol.DefaultTCPMSS)
+	if estimate < int(b.minCongestionWindow) {
+		return b.minCongestionWindow
+	}
+	return protocol.ByteCount(estimate)
+}
+
+// SetNumEmulatedConnections sets the number of emulated connections
+func (b *BBRSender) SetNumEmulatedConnections(n int) {
+	b.numConnections = utils.Max(n, 1)
+	b.bbr.SetNumConnections(b.numConnections)
+}
+
+// OnRetransmissionTimeout is called on an retransmission timeout
+func (b *BBRSender) OnRetransmissionTimeout(packetsRetransmitted bool) {
+	b.largestSentAtLastCutback = protocol.InvalidPacketNumber
+	if !packetsRetransmitted {
+		return
+	}
+	b.bbr.Reset()
+	b.congestionWindow = protocol.ByteCount(b.BandwidthEstimate()) //b.minCongestionWindow
+}
+
+// OnConnectionMigration is called when the connection is migrated (?)
+func (b *BBRSender) OnConnectionMigration() {
+	b.largestSentPacketNumber = protocol.InvalidPacketNumber
+	b.largestAckedPacketNumber = protocol.InvalidPacketNumber
+	b.largestSentAtLastCutback = protocol.InvalidPacketNumber
+	b.lastCutbackExitedSlowstart = false
+	b.bbr.Reset()
+	b.numAckedPackets = 0
+	//b.congestionWindow = b.initialCongestionWindow
+	b.maxCongestionWindow = b.initialMaxCongestionWindow
 }

@@ -11,7 +11,7 @@ const MaxPacketSizeIPv4 = 1252
 // MaxPacketSizeIPv6 is the maximum packet size that we use for sending IPv6 packets.
 const MaxPacketSizeIPv6 = 1232
 
-const defaultMaxCongestionWindowPackets = 1000
+const defaultMaxCongestionWindowPackets = 5000 //1000
 
 // DefaultMaxCongestionWindow is the default for the max congestion window
 const DefaultMaxCongestionWindow ByteCount = defaultMaxCongestionWindowPackets * DefaultTCPMSS

@@ -83,7 +83,7 @@ func NewSentPacketHandler(
 	traceCallback func(quictrace.Event),
 	logger utils.Logger,
 ) SentPacketHandler {
-	congestion := congestion.NewCubicSender(
+	congestion := congestion.NewBBRSender(
 		congestion.DefaultClock{},
 		rttStats,
 		false, // use Reno
