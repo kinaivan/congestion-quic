@@ -1,4 +1,4 @@
-/* package congestion
+package congestion
 
 import (
 	"log"
@@ -157,7 +157,7 @@ func (h *Hybla) CongestionWindowAfterAck(
 // SetNumConnections sets the number of emulated connections
 func (h *Hybla) SetNumConnections(n int) {
 	h.numConnections = n
-} */
+}
 
 /* package congestion
 
@@ -386,6 +386,7 @@ func (c *Cubic) SetNumConnections(n int) {
 	c.numConnections = n
 } */
 
+/*
 package congestion
 
 import (
@@ -521,4 +522,4 @@ func (b *BBR) CongestionWindowAfterAck(
 // SetNumConnections sets the number of emulated connections
 func (b *BBR) SetNumConnections(n int) {
 	b.numConnections = n
-}
+} */

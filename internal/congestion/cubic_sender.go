@@ -1,4 +1,4 @@
-/* package congestion
+package congestion
 
 import (
 	"bufio"
@@ -351,6 +351,7 @@ func (h *hyblaSender) maybeIncreaseCwnd(
 		//log.Printf("pnum: %d, ssthresh: %d, h.congestionWindow: %d, ssCounter: %d, inFlight = %d\n", h.p, h.slowstartThreshold, h.congestionWindow, h.ssCounter, priorInFlight)
 		// TCP slow start, exponential growth, increase by one for each ACK.
 		h.congestionWindow += protocol.ByteCount(uint32(protocol.DefaultTCPMSS) * (uint32(math.Pow(2, float64(h.p))) - 1))
+		//h.congestionWindow = protocol.ByteCount(int(h.congestionWindow) * int(h.p))
 		log.Printf("AFTER SS: %d, thresh %d, infli: %d, bandwidth: %d, rtt: %d\n", h.congestionWindow, h.slowstartThreshold, priorInFlight, h.BandwidthEstimate(), h.rttStats.SmoothedRTT())
 		h.RecordCongestionWindow()
 		return
@@ -436,7 +437,7 @@ func (h *hyblaSender) OnConnectionMigration() {
 // SetSlowStartLargeReduction allows enabling the SSLR experiment
 func (h *hyblaSender) SetSlowStartLargeReduction(enabled bool) {
 	h.slowStartLargeReduction = enabled
-} */
+}
 
 /* package congestion
 
@@ -850,7 +851,7 @@ func (c *cubicSender) SetSlowStartLargeReduction(enabled bool) {
 	c.slowStartLargeReduction = enabled
 } */
 
-package congestion
+/* package congestion
 
 import (
 	"bufio"
@@ -1140,7 +1141,7 @@ func (b *BBRSender) maybeIncreaseCwnd(
 		/* if b.less == 2 {
 			b.congestionWindow = protocol.ByteCount(float32(b.congestionWindow) * 1.18)
 			b.congestionWindow = utils.MinByteCount(b.maxCongestionWindow, b.congestionWindow)
-		} */
+		} */ /*
 		//log.Printf("Epoch ENDED: %s, currentTime: %s, timeSinceEpoch: %d\n", b.epoch, currentTime, int(timeSinceEpoch)/1000000)
 		b.epoch = currentTime
 		b.epochCounter += 1
@@ -1154,7 +1155,7 @@ func (b *BBRSender) maybeIncreaseCwnd(
 		log.Printf("MORE/LESS: %d, infli: %d, bandwidth: %d, rtt: %d, timeSinceEpoch: %d, minrtt: %d, previousRTT: %d\n", b.congestionWindow, priorInFlight, b.BandwidthEstimate(), int(b.rttStats.SmoothedRTT())/1000000, int(timeSinceEpoch)/1000000, b.minrtt, b.previousRTT)
 		b.RecordCongestionWindow()
 		return
-	} */
+	} */ /*
 	// Do not increase the congestion window unless the sender is close to using
 	// the current window.
 	if !b.isCwndLimited(priorInFlight) {
@@ -1221,7 +1222,7 @@ func (b *BBRSender) BandwidthEstimate() protocol.ByteCount {
 		return protocol.ByteCount(BandwidthFromDelta(b.GetCongestionWindow(), srtt))
 	} else {
 		return b.minCongestionWindow
-	} */
+	} */ /*
 	srtt := b.rttStats.MinRTT()
 	if srtt == 0 {
 		return 0
@@ -1259,4 +1260,4 @@ func (b *BBRSender) OnConnectionMigration() {
 	b.numAckedPackets = 0
 	//b.congestionWindow = b.initialCongestionWindow
 	b.maxCongestionWindow = b.initialMaxCongestionWindow
-}
+} */
